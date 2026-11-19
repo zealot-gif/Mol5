@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MolView</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><polygon points='32,6 54,19 54,45 32,58 10,45 10,19' fill='none' stroke='%230284c7' stroke-width='5'/><circle cx='32' cy='32' r='13' fill='none' stroke='%230284c7' stroke-width='4'/></svg>">
+  <style>
+    .hidden { display: none !important; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+  </style>
+  <link rel="stylesheet" href="./style.css?v=10" />
+
+  <!-- 3Dmol.js 3D 渲染引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
+  <!-- OpenChemLib JS (SMILES 解析與本地 3D 構象演算) -->
+  <script src="https://cdn.jsdelivr.net/npm/openchemlib@8.14.0/dist/openchemlib-full.js"></script>
+</head>
+<body>
+  <div class="app-container" id="appContainer">
+    <!-- 左側：2D 繪圖區 -->
+    <div class="editor-pane" id="editorPane">
+      <!-- 頂部第一排：核心選單島 -->
+      <div class="floating-bar top-menu">
+        <div class="brand-logo" title="MolView">🧪</div>
+        <button class="menu-btn" id="exportBtn" title="保存 (.SDF)">☁ <span class="hide-xs">保存 (.SDF)</span><span class="show-xs">保存</span></button>
+        <button class="menu-btn active" id="toggle3DBtn">👁 2D / 3D</button>
+        <div class="search-wrap" id="searchWrap">
+          <span>🔍</span>
+          <input type="text" id="searchInput" autocomplete="off" placeholder="搜索 (如 caffeine)..." />
+        </div>
+        <button class="menu-btn primary-pill" id="syncBtn">⚡ 轉 3D</button>
+      </div>
+
+      <!-- 搜尋自動補全下拉選單（獨立置於外層避免手機版橫向捲動裁切） -->
+      <div class="search-suggestions hidden" id="searchSuggestions"></div>
+
+      <!-- 頂部第二排：編輯動作島 -->
+      <div class="floating-bar sub-menu">
+        <button class="tool-icon" id="btnErase" title="橡皮擦 (點擊或按住拖曳連續擦除原子、鍵與箭頭)">
+          <img
+            class="eraser-icon-img"
+            alt="橡皮擦"
+            src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg transform='rotate(-45 32 32)'%3E%3Crect x='14' y='6' width='36' height='52' rx='8' fill='%23f3f1e8' stroke='%230f172a' stroke-width='4.2'/%3E%3Cpath d='M14 14 A8 8 0 0 1 22 6 H42 A8 8 0 0 1 50 14 V38 H14 Z' fill='%231d63b8' stroke='%230f172a' stroke-width='4.2'/%3E%3Crect x='23' y='6' width='18' height='32' fill='%23ffffff' stroke='%230f172a' stroke-width='3.2'/%3E%3Cline x1='32' y1='6' x2='32' y2='38' stroke='%230f172a' stroke-width='2.6'/%3E%3C/g%3E%3C/svg%3E"
+          />
+        </button>
+        <button class="tool-icon danger" id="btnClear" title="清空畫布">🗑</button>
+        <div class="divider"></div>
+        <button class="tool-icon" id="btnUndo" title="復原">↶</button>
+        <button class="tool-icon" id="btnRedo" title="重做">↷</button>
+        <div class="divider"></div>
+        <button class="tool-icon" id="btnClean" title="自動重整結構 (拉正鍵角與正多邊形)">✨</button>
+        <button class="tool-icon" id="btnChair" title="轉換六員環為椅型構象 (Chair / 環翻轉)">🪑</button>
+        <button class="tool-icon h-toggle-btn" id="btnToggleH" title="顯示 / 隱藏 2D 氫原子 (H)">H</button>
+        <div class="divider"></div>
+        <button class="tool-icon" id="btnCenter" title="置中">⌖</button>
+        <button class="tool-icon" id="btnZoomIn" title="放大">⊕</button>
+        <button class="tool-icon" id="btnZoomOut" title="縮小">⊖</button>
+      </div>
+
+      <!-- 左側直立工具島 -->
+      <div class="floating-dock left-dock">
+        <button class="dock-btn active" data-tool="move" title="移動分子 (拖曳單一分子調整距離，拖曳空白處平移畫布)">✋</button>
+        <button class="dock-btn" data-tool="atom" title="添加 / 替換原子">⚛</button>
+        <div class="h-divider"></div>
+        <button class="dock-btn" data-tool="bond" data-order="1" title="單鍵">／</button>
+        <button class="dock-btn" data-tool="bond" data-order="2" title="雙鍵">＝</button>
+        <button class="dock-btn" data-tool="bond" data-order="3" title="三鍵">≡</button>
+        <div class="h-divider"></div>
+        <button class="dock-btn charge-symbol" data-tool="charge" data-val="1" title="正電荷 (+1，氫原子數同步增加)">+</button>
+        <button class="dock-btn charge-symbol" data-tool="charge" data-val="-1" title="負電荷 (-1，氫原子數同步減少)">-</button>
+        <button class="dock-btn" data-tool="lonepair" title="孤電子對 (依物理排斥自動定位)">：:</button>
+        <button class="dock-btn" data-tool="arrow" title="電子轉移彎箭頭 (畫完可調弧度上下與去回)">↷</button>
+        <div class="h-divider"></div>
+        <button class="dock-btn" data-tool="ring" data-ring="polygon" title="多邊形環 (點擊放六員環，拖曳可調整 3~18 員環)">⬡</button>
+        <button class="dock-btn" id="openRingLibBtn" title="芳香環與生醫環模板 (苯、萘、蒽、菲、嘌呤、嘧啶、吡啶、哌啶)">⏣</button>
+        <button class="dock-btn sub-lib-trigger" id="openSubLibBtn" title="常見取代基 (-CH3, -C2H5, -OH, -NH2, -COOH, -CHO, -NO2, -CN, -OCH3, 苯環)">-R</button>
+      </div>
+
+      <!-- 芳香環與生醫常見環模板彈窗 -->
+      <div class="ring-lib-modal hidden" id="ringLibModal">
+        <div class="pt-header">
+          <span>芳香環與生醫環模板</span>
+          <button id="closeRingLibBtn">✕</button>
+        </div>
+        <div class="ring-lib-grid" id="ringLibGrid"></div>
+      </div>
+
+      <!-- 常見取代基模板彈窗 -->
+      <div class="ring-lib-modal sub-lib-modal hidden" id="subLibModal">
+        <div class="pt-header">
+          <span>常見取代基 / 官能基</span>
+          <button id="closeSubLibBtn">✕</button>
+        </div>
+        <div class="ring-lib-grid" id="subLibGrid"></div>
+      </div>
+
+      <!-- 電子轉移彎箭頭微調浮動面板 -->
+      <div class="arrow-control-bar hidden" id="arrowControlBar">
+        <span class="arrow-bar-label">彎箭頭</span>
+        <button class="arrow-ctrl-btn" id="btnArrowCurveUp" title="弧度向上">弧度 ↑</button>
+        <button class="arrow-ctrl-btn" id="btnArrowCurveDown" title="弧度向下">弧度 ↓</button>
+        <button class="arrow-ctrl-btn" id="btnArrowFlip" title="箭頭方向去 / 回">去 / 回 ⇄</button>
+        <button class="arrow-ctrl-btn danger" id="btnArrowDelete" title="刪除此箭頭">🗑</button>
+        <button class="arrow-ctrl-btn close" id="btnArrowClose" title="完成調整">✕</button>
+      </div>
+
+      <!-- 右側直立工具島：常見元素 + 完整週期表按鈕 -->
+      <div class="floating-dock right-dock">
+        <button class="atom-btn" data-atom="H">H</button>
+        <button class="atom-btn active" data-atom="C">C</button>
+        <button class="atom-btn" data-atom="N">N</button>
+        <button class="atom-btn" data-atom="O">O</button>
+        <button class="atom-btn" data-atom="P">P</button>
+        <button class="atom-btn" data-atom="S">S</button>
+        <div class="h-divider"></div>
+        <button class="atom-btn" data-atom="F">F</button>
+        <button class="atom-btn" data-atom="Cl">Cl</button>
+        <button class="atom-btn" data-atom="Br">Br</button>
+        <button class="atom-btn" data-atom="I">I</button>
+        <div class="h-divider"></div>
+        <button class="pt-trigger-btn" id="openPtBtn" title="開啟完整元素週期表">•••</button>
+      </div>
+
+      <!-- 完整元素週期表彈窗 -->
+      <div class="pt-modal hidden" id="ptModal">
+        <div class="pt-header">
+          <span>選擇元素 (元素週期表)</span>
+          <button id="closePtBtn">✕</button>
+        </div>
+        <div class="pt-grid" id="ptGrid"></div>
+      </div>
+
+      <!-- 左下角縮放百分比標籤 -->
+      <div class="zoom-badge" id="zoomBadge">100%</div>
+
+      <!-- 原生高解析 HTML5 化學繪圖畫布 -->
+      <canvas id="molCanvas"></canvas>
+    </div>
+
+    <!-- 右側：3D 分子視覺化視窗 -->
+    <div class="viewer-pane" id="viewerPane">
+      <!-- 手機版專用：返回 2D 編輯按鈕 -->
+      <button class="back-to-2d-btn" id="backTo2DBtn" title="返回 2D 編輯畫布">← 返回 2D 編輯</button>
+
+      <div class="viewer-controls">
+        <select id="styleSelect">
+          <option value="stick">球棍模型 (Ball & Stick)</option>
+          <option value="sphere">空間填充 (Space-filling)</option>
+          <option value="line">線框模型 (Wireframe)</option>
+        </select>
+
+        <!-- 單鍵二面角旋轉控制盒 -->
+        <div class="torsion-box" id="torsionBox" style="display: none;">
+          <div class="torsion-header">
+            <select id="bondSelect" title="選擇要旋轉的單鍵"></select>
+            <span id="torsionAngleLabel">0°</span>
+          </div>
+          <input type="range" id="torsionSlider" min="0" max="360" value="0" step="1" />
+          <div class="torsion-status" id="torsionStatus">初始構象 (Staggered)</div>
+        </div>
+      </div>
+      <div id="viewer_3d"></div>
+      <div class="mol-status-card">
+        <span id="sourceBadge" class="badge cloud">☁ PubChem</span>
+        <strong id="molFormula">—</strong>
+        <span id="molInfo">準備就緒</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 深色質感置中通知彈窗 -->
+  <div class="custom-alert-overlay hidden" id="customAlertOverlay" role="dialog" aria-modal="true" aria-labelledby="customAlertMessage">
+    <div class="custom-alert-card warning" id="customAlertCard">
+      <div class="custom-alert-icon" id="customAlertIcon"></div>
+      <div class="custom-alert-message" id="customAlertMessage"></div>
+      <button type="button" class="custom-alert-btn" id="customAlertConfirmBtn">確定</button>
+    </div>
+  </div>
+
+  <script src="./app.js?v=16"></script>
+</body>
+</html>
